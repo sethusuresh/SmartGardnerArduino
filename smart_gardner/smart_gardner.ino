@@ -66,7 +66,7 @@ void startBT() {
   lcd.setCursor(0, 1);
   lcd.print("Turning On BT");
   delay(3000);
-  Serial.begin(9600);
+  Serial.begin(9600);//starting BT in communication mode
   //ready for connection
   dataReceived = false;
   lcd.setCursor(0, 1);
@@ -198,27 +198,26 @@ void loop() {
   //check transceiver module
   //lcd.print(Transceiver Modules connected");
 
-  //post connection
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  scrollInFromRight(1, "BT Connected to Device");
+//  //post connection
+//  lcd.setCursor(0, 1);
+//  lcd.print("                ");
+//  scrollInFromRight(1, "BT Connected to Device");
 
   if (Serial.available() > 0) {
     rxData = Serial.readString();
-    splitString(rxData, "|");
-    String days = data[0];
-    String morningTime = data[1];
-    String eveningTime = data[2];
-    dataReceived = true;
+    if(rxData.length() > 0){
+      splitString(rxData, "|");
+      String days = data[0];
+      String morningTime = data[1];
+      String eveningTime = data[2];
+      dataReceived = true;
+    }
   }
 
 
   //check selected option
   if (dataReceived && waterNow(days, morningTime, eveningTime)) {
-    startWatering();
-  }
-
-  //send mode to other arduinos
+    //send mode to other arduinos
   lcd.setCursor(0, 1);
   lcd.print("                ");
   scrollInFromRight(1, "Mode Broadcasting");
@@ -229,5 +228,8 @@ void loop() {
   lcd.print("                ");
   scrollInFromRight(1, "Received Ack from subscibers");
   delay(3000);
+    startWatering();
+  }
+
 }
 
