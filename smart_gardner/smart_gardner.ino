@@ -12,7 +12,7 @@ DS1302 rtc(CE, IO, SCLK);
 // Initializing the motor
 const int motorPositive = 9;//motor negative is always grounded
 // Initializing nrf24l01 
-const int MOSI = 11, MISO = 12, SCK = 13; 
+const int MOSI = 11, MISO = 12, SCK = 13, CE = 16, CSN = 17; 
 //other global variables
 String rxData = "";
 String days = "";
