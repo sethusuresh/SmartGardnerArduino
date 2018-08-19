@@ -1,17 +1,18 @@
 #include <LiquidCrystal.h>// include the library code:
 #include <DS1302.h>// RTC library for DS1302
 
-// initialize the library by associating any needed LCD interface pin with the arduino pin number it is connected to
+// initializing LCD
 int Contrast = 100;
 int backLight = 50;
-const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+const int rs = 18, en = 19, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 // Initialzing the DS1302
 const int CE = 2, IO = 3, SCLK = 4;
 DS1302 rtc(CE, IO, SCLK);
 // Initializing the motor
-const int motorPositive = 9;
-//motor negative is always grounded
+const int motorPositive = 9;//motor negative is always grounded
+// Initializing nrf24l01 
+const int MOSI = 11, MISO = 12, SCK = 13; 
 //other global variables
 String rxData = "";
 String days = "";
