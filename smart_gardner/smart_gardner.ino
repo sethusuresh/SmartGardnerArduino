@@ -1,5 +1,6 @@
-#include <LiquidCrystal.h>// include the library code:
+#include <LiquidCrystal.h>// For LCD display
 #include <DS1302.h>// RTC library for DS1302
+#include <EEPROMReadWriteLibrary.h>//EEPROM cust library
 
 // initializing LCD
 int Contrast = 100;
@@ -7,12 +8,14 @@ int backLight = 50;
 const int rs = 18, en = 19, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 // Initialzing the DS1302
-const int CE = 2, IO = 3, SCLK = 4;
+const int CE = 7, IO = 10, SCLK = 8;
 DS1302 rtc(CE, IO, SCLK);
 // Initializing the motor
-const int motorPositive = 9;//motor negative is always grounded
+const int motorPositive = 14;//motor negative is always grounded
 // Initializing nrf24l01 
-const int MOSI = 11, MISO = 12, SCK = 13, CE = 16, CSN = 17; 
+//const int MOSI = 11, MISO = 12, SCK = 13, CE = 16, CSN = 17; 
+//Initializing EEPROM
+EEPROMReadWriteLibrary eeprom;
 //other global variables
 String rxData = "";
 String days = "";
@@ -31,7 +34,7 @@ void scrollInFromRight(int line, char str1[]) {
     }
     lcd.setCursor(j, line);
     lcd.print(str1);
-    delay(500);
+    delay(250);
   }
   if (i > 16) {
     char str[50];
@@ -46,7 +49,7 @@ void scrollInFromRight(int line, char str1[]) {
       }
       lcd.setCursor(0, line);
       lcd.print(str);
-      delay(500);
+      delay(250);
     }
   }
 }
@@ -69,11 +72,10 @@ void startBT() {
   delay(3000);
   Serial.begin(9600);//starting BT in communication mode
   //ready for connection
-  dataReceived = false;
+  //dataReceived = false;
   lcd.setCursor(0, 1);
   lcd.print("                ");
   scrollInFromRight(1, "Waiting For Connection");
-  delay(3000);
 }
 
 void splitString(String rxData, String delimiter) {
@@ -103,7 +105,12 @@ void initializeRTC() {
   // The following lines can be commented out to use the values already stored in the DS1302
   rtc.setDOW(FRIDAY);        // Set Day-of-Week to FRIDAY
   rtc.setTime(12, 0, 0);     // Set the time to 12:00:00 (24hr format)
-  rtc.setDate(6, 8, 2010);   // Set the date to August 6th, 2010
+  rtc.setDate(3, 9, 2018);   // Set the date to August 6th, 2010
+  //Display time in LCD
+  lcd.setCursor(0, 0);
+  lcd.print("                ");
+  lcd.setCursor(4, 0);
+  lcd.print(rtc.getTimeStr());
 }
 
 bool isMorning(String currentTime) {
@@ -178,6 +185,29 @@ void initializeMotor() {
   pinMode(motorPositive, OUTPUT);
 }
 
+boolean readFromEEPROM(){
+  const int BUFSIZE = 15;
+  char buf[BUFSIZE];
+  boolean timingSaved;
+  if(eeprom.eeprom_read_string(0, buf, BUFSIZE)){
+    String savedTiming(buf);
+    splitString(savedTiming, "|");
+    days = data[0];
+    morningTime = data[1];
+    eveningTime = data[2];
+    if(days.length()==0 && morningTime.length()==0 && eveningTime.length()==0){
+      timingSaved = false;  
+    }
+    else{
+      timingSaved = true;  
+    }
+  }
+  else{
+    timingSaved = false;  
+  }
+  return timingSaved;
+}
+
 void setup() {
   initializeLCD();
   initializeRTC();
@@ -187,13 +217,14 @@ void setup() {
   lcd.setCursor(0, 1);
   lcd.print("Powering Up!!");
   delay(3000);
+  //read from EEPROM and returns true if time is saved in EEPROM
+  dataReceived = readFromEEPROM(); 
   startBT();
 }
 
 void loop() {
   //display time in LCD first row
   lcd.setCursor(4, 0);
-  lcd.print("                ");
   lcd.print(rtc.getTimeStr());
 
   //check transceiver module
@@ -204,13 +235,22 @@ void loop() {
 //  lcd.print("                ");
 //  scrollInFromRight(1, "BT Connected to Device");
 
+  
+
+
   if (Serial.available() > 0) {
     rxData = Serial.readString();
+    int str_len = rxData.length() + 1; 
+    char char_array[str_len];
+    rxData.toCharArray(char_array, str_len);
+    if(eeprom.eeprom_write_string(0, char_array)){
+      //saved succefully
+    }
     if(rxData.length() > 0){
       splitString(rxData, "|");
-      String days = data[0];
-      String morningTime = data[1];
-      String eveningTime = data[2];
+      days = data[0];
+      morningTime = data[1];
+      eveningTime = data[2];
       dataReceived = true;
     }
   }
@@ -219,18 +259,15 @@ void loop() {
   //check selected option
   if (dataReceived && waterNow(days, morningTime, eveningTime)) {
     //send mode to other arduinos
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  scrollInFromRight(1, "Mode Broadcasting");
-  delay(3000);
-
-  //wait for ack from all arduinos
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  scrollInFromRight(1, "Received Ack from subscibers");
-  delay(3000);
+    lcd.setCursor(0, 1);
+    lcd.print("                ");
+    scrollInFromRight(1, "Mode Broadcasting");
+  
+    //wait for ack from all arduinos
+    lcd.setCursor(0, 1);
+    lcd.print("                ");
+    scrollInFromRight(1, "Received Ack from subscibers");
     startWatering();
   }
 
 }
-
