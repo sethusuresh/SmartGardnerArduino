@@ -1,86 +1,45 @@
-#include <LiquidCrystal.h>// For LCD display
+#include <ESP8266WiFi.h>// Wifi library
+#include<FirebaseArduino.h>// Firebase library
 #include <DS1302.h>// RTC library for DS1302
-#include <EEPROMReadWriteLibrary.h>//EEPROM cust library
+#include <Ticker.h>//nodemcu timer library
+#include <Wire.h>
+#include "OLED.h"
 
-// initializing LCD
-int Contrast = 100;
-int backLight = 125;
-const int rs = 18, en = 19, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
-LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+//Initializing FIREBASE
+#define FIREBASE_HOST "smart-gardener-bf768.firebaseio.com"                     //Your Firebase Project URL goes here without "http:" , "\" and "/"
+#define FIREBASE_AUTH "CNuPIJwpGHzeFBeGbae7CsKvghZEiqMNjIthrOiB"       //Your Firebase Database Secret goes here
 
-// Initialzing the DS1302
-const int RST = 7, DAT = 10, CLK = 8;
+//Initializing WiFi
+#define WIFI_SSID "suresh"                                               //your WiFi SSID for which yout NodeMCU connects
+#define WIFI_PASSWORD "9447778829"                                      //Password of your wifi network 
+//#define WIFI_SSID "Motosethu"  
+//#define WIFI_PASSWORD "12345678"  
+
+//Initializing OLED Display
+const int _SDA = 4;//where 4, 5 correspond to NodeMCU D2 and D1
+const int _SCL = 5;
+OLED display(_SDA, _SCL);
+
+// Initialzing the DS1302 RTC
+const int RST = 15, DAT = 13, CLK = 12;
 DS1302 rtc(RST, DAT, CLK);
 
 // Initializing the motor
-const int motorPositive = 14;//motor negative is always grounded
+const int motorPositive = 14;//D5 of nodeMCU. motor negative is always grounded
 
-// Initializing nrf24l01 
-//const int MOSI = 11, MISO = 12, SCK = 13, CE = 16, CSN = 17; 
+//Initializing Timer
+Ticker timer;
+Ticker waterTimer;
 
-//Initializing EEPROM
-EEPROMReadWriteLibrary eeprom;
-//other global variables
+//Initializing other global variables
 String rxData = "";
 String days = "";
 String morningTime = "";
 String eveningTime = "";
 String data[8];
 int sizeOfData = 0;
-bool dataReceived = false;
-
-void scrollInFromRight(int line, char str1[]) {
-  int i = strlen(str1);
-  for (int j = 16; j >= 0; j--) {
-    lcd.setCursor(0, line);
-    for (int k = 0; k <= 15; k++) {
-      lcd.print(" "); // Clear line
-    }
-    lcd.setCursor(j, line);
-    lcd.print(str1);
-    delay(250);
-  }
-  if (i > 16) {
-    char str[50];
-    for (int x = 0; x < i - 16; x++) {
-      int a = 0;
-      for (int y = x; y < i; y++) {
-        str[a] = str1[y + 1];
-        a++;
-      }
-      for (int k = 0; k <= 15; k++) {
-        lcd.print(" "); // Clear line
-      }
-      lcd.setCursor(0, line);
-      lcd.print(str);
-      delay(250);
-    }
-  }
-}
-
-void initializeLCD() {
-  //set up LCD's contrast
-  analogWrite(6, Contrast);
-  //Turn on LCD's backlight
-  analogWrite(9, backLight);
-  // set up the LCD's number of columns and rows:
-  lcd.begin(16, 2);
-}
-
-void startBT() {
-  //turn on BT
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  lcd.setCursor(0, 1);
-  lcd.print("Turning On BT");
-  delay(3000);
-  Serial.begin(9600);//starting BT in communication mode
-  //ready for connection
-  //dataReceived = false;
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  scrollInFromRight(1, "Waiting For Connection");
-}
+bool timeout = false;
+bool stopWateringTimer = false;
 
 void splitString(String rxData, String delimiter) {
   int i = 0;
@@ -107,13 +66,12 @@ void initializeRTC() {
   rtc.halt(false);
   rtc.writeProtect(false);
   // The following lines can be commented out to use the values already stored in the DS1302
-  //rtc.setDOW(MONDAY);        // Set Day-of-Week to FRIDAY
-  //rtc.setTime(23, 55, 00);     // Set the time to 12:00:00 (24hr format)
-  //rtc.setDate(1, 10, 2018);   // Set the date to August 6th, 2010
-  //Display time in LCD
-  lcd.clear();
-  lcd.setCursor(4, 0);
-  lcd.print(rtc.getTimeStr());
+  //rtc.setDOW(SATURDAY);        // Set Day-of-Week to FRIDAY
+  //rtc.setTime(13, 45, 00);     // Set the time to 12:00:00 (24hr format)
+  //rtc.setDate(13, 7, 2019);   // Set the date to August 6th, 2010
+  //Display time in OLED
+  Serial.println(rtc.getTimeStr());
+  display.print(rtc.getTimeStr());
 }
 
 bool isMorning(String currentTime) {
@@ -171,118 +129,173 @@ bool waterNow(String days, String morningTime, String eveningTime) {
 }
 
 void startWatering() {
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  lcd.setCursor(0, 1);
-  lcd.print("watering started");
+  //print watering started in OLED display
   digitalWrite(motorPositive, HIGH);
-  delay(15000);//change this time based on real water speed
+  display.clear();
+  display.print("WATERING STARTED", 4);
+  initializeWateringTimer();
+}
+
+void stopWatering() {
   digitalWrite(motorPositive, LOW);
-  //end watering
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  scrollInFromRight(1, "Watering completed");
+  Serial.println("Watering Completed.........");
+  scrollText("WATERING COMPLETED");
+  waterTimer.detach();
 }
 
 void initializeMotor() {
   pinMode(motorPositive, OUTPUT);
 }
 
-boolean readFromEEPROM(){
-  const int BUFSIZE = 15;
-  char buf[BUFSIZE];
-  boolean timingSaved;
-  if(eeprom.eeprom_read_string(0, buf, BUFSIZE)){
-    String savedTiming(buf);
-    splitString(savedTiming, "|");
-    days = data[0];
-    morningTime = data[1];
-    eveningTime = data[2];
-    if(days.length()==0 && morningTime.length()==0 && eveningTime.length()==0){
-      timingSaved = false;  
+void initializeFirebase() {
+  if(WiFi.status() == WL_CONNECTED){
+    Firebase.begin(FIREBASE_HOST,FIREBASE_AUTH);
+    int attempt = 0;
+    while(Firebase.failed() && attempt < 5){
+      Serial.print("Firebase Connection failed. Reconnecting...");
+      Serial.println(Firebase.error());
+      display.clear();
+      scrollText("FIREBASE CONNECTION FAILED. RECONNECTING...");
+      Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+      attempt++;
+    }
+    if(!Firebase.failed()){
+      Serial.println("Firebase connection successfull.......");
+      display.clear();
+      scrollText("CONNECTED TO FIREBASE");
+      delay(3000);
     }
     else{
-      timingSaved = true;  
+      display.clear();
+      scrollText("FIREBASE CONNECTION FAILED");
+      delay(3000);
     }
   }
   else{
-    timingSaved = false;  
+    display.clear();
+    scrollText("FIREBASE CONNECTION FAILED. WIFI NOT CONNECTED");
+    delay(3000);
   }
-  return timingSaved;
+}
+
+void ICACHE_RAM_ATTR onTimerISR(){
+   timeout = true;
+}
+
+void initializeTimer() {
+  //Initialize Ticker every 1 min
+    timer.attach(60, onTimerISR);  
+}
+
+void ICACHE_RAM_ATTR onWaterTimerISR(){
+   stopWateringTimer = true;
+}
+
+void initializeWateringTimer() {
+  waterTimer.attach(20, onWaterTimerISR);
+}
+
+void initializeWifi() {
+  WiFi.begin(WIFI_SSID,WIFI_PASSWORD);
+  int attempt = 0;
+  while (WiFi.status()!=WL_CONNECTED && attempt<5){
+    Serial.print(".");
+    delay(500);
+    attempt++;
+  }
+  if(WiFi.status() == WL_CONNECTED){
+    Serial.println("connected:");
+    Serial.print(WiFi.localIP());
+  }else{
+    Serial.println("not connected...");
+  }
+}
+
+void scrollText(String text) {
+  char copy[50];
+  if(text.length() < 16){
+    text.toCharArray(copy, 50);
+    display.print(copy, 4);
+  }
+  else{
+    int diff = text.length() - 16;
+    int i=0;
+    while(i <= diff){
+      display.print(rtc.getTimeStr(), 0, 4); 
+      String newText = text.substring(i, 16+i);
+      newText.toCharArray(copy, 50);
+      display.print(copy, 4);
+      i++;
+      delay(1000);
+    }
+  }
+}
+
+void initializeDisplay() {
+  display.begin();
+  display.print("POWERING ON", 4);
+  delay(3000);
+  display.clear();
+  if(WiFi.status() == WL_CONNECTED){
+    scrollText("CONNECTED TO WiFi");
+  }
+  else{
+    scrollText("NOT CONNECTED TO WiFi");
+  }
+  delay(3000); 
 }
 
 void setup() {
-  Serial.begin(9600);
-  initializeLCD();
+  Serial.begin(115200);
+  initializeWifi();
+  initializeDisplay();
   initializeRTC();
   initializeMotor();
-  lcd.setCursor(0, 1);
-  lcd.print("                ");
-  lcd.setCursor(0, 1);
-  lcd.print("Powering Up!!");
-  //read from EEPROM and returns true if time is saved in EEPROM
-  //dataReceived = readFromEEPROM(); 
-  //startBT(); commenting temporarily
-  lcd.clear();
+  initializeFirebase();
+  initializeTimer();
 }
 
 void loop() {
-  //display time in LCD first row
-  lcd.setCursor(4, 0);
-  lcd.print(rtc.getTimeStr());
   Serial.println(rtc.getTimeStr());
-  
+  display.print(rtc.getTimeStr(), 0, 4);  
+  if(timeout){
+    timeout = false;
+    if(WiFi.status() != WL_CONNECTED){
+      scrollText("WiFi DISCONNECTED");
+      initializeWifi();
+      if(WiFi.status() != WL_CONNECTED){
+        scrollText("NOT CONNECTED TO WiFi");
+      }
+      else{
+        scrollText("CONNECTED TO WiFi");
+        if (Firebase.failed()){
+          initializeFirebase();
+        }
+      }
+    }
+    else{
+      scrollText("CONNECTED TO WiFi");
+      if (Firebase.failed()){
+        initializeFirebase();
+      }
+    }
+    String waterNowVal = Firebase.get("/FwJmI8JmppMITms75sTBiUA6cKD2").getString("waterNow"); 
+    Serial.println("waterNow: "+ waterNowVal);
+    String days = Firebase.get("/FwJmI8JmppMITms75sTBiUA6cKD2").getString("daysOfWeek"); 
+    Serial.println("days: "+ days);
+    String morningTime = Firebase.get("/FwJmI8JmppMITms75sTBiUA6cKD2").getString("morningTime"); 
+    Serial.println("morningTime: "+ morningTime);
+    String eveningTime = Firebase.get("/FwJmI8JmppMITms75sTBiUA6cKD2").getString("eveningTime"); 
+    Serial.println("eveningTime: "+ eveningTime);
+    if (waterNowVal.equalsIgnoreCase("true") || waterNow(days, morningTime, eveningTime)) {
+      startWatering();
+    }
+  }
 
-  //check transceiver module
-  //lcd.print(Transceiver Modules connected");
-
-//  //post connection
-//  lcd.setCursor(0, 1);
-//  lcd.print("                ");
-//  scrollInFromRight(1, "BT Connected to Device");
-
-  
-
-//commenting temporarily
-//  if (Serial.available() > 0) {
-//    rxData = Serial.readString();
-//    int str_len = rxData.length() + 1; 
-//    char char_array[str_len];
-//    rxData.toCharArray(char_array, str_len);
-//    if(eeprom.eeprom_write_string(0, char_array)){
-//      //saved succefully
-//    }
-//    if(rxData.length() > 0){
-//      splitString(rxData, "|");
-//      days = data[0];
-//      morningTime = data[1];
-//      eveningTime = data[2];
-//      dataReceived = true;
-//    }
-//  }
-
-//Temporary code for mvp
-dataReceived = true;
-days = "MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY,";
-morningTime = "07:00:00";
-eveningTime = "00:00:00";
-//temp code ends here
-
-
-  //check selected option
-  if (dataReceived && waterNow(days, morningTime, eveningTime)) {
-    //commenting temporarily 
-    //send mode to other arduinos
-//    lcd.setCursor(0, 1);
-//    lcd.print("                ");
-//    scrollInFromRight(1, "Mode Broadcasting");
-//  
-//    //wait for ack from all arduinos
-//    lcd.setCursor(0, 1);
-//    lcd.print("                ");
-//    scrollInFromRight(1, "Received Ack from subscibers");
-    startWatering();
+  if(stopWateringTimer){
+    stopWateringTimer = false;
+    stopWatering();
+    Firebase.setString("/FwJmI8JmppMITms75sTBiUA6cKD2/waterNow","false");//test this in detail.
   }
   delay (1000);
-
 }
